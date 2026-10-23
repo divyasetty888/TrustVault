@@ -1,4 +1,3 @@
-
 import os
 from dotenv import load_dotenv
 from flask import Flask, jsonify
@@ -53,6 +52,10 @@ def create_app(test_config=None):
         dashboard_bp,
         url_prefix="/dashboard",
     )
+    from routes.documents import documents_bp
+    app.register_blueprint(documents_bp)
+    from routes.sharing import sharing_bp
+    app.register_blueprint(sharing_bp)
 
     # Import models and create database tables
     from models import User, Document, DocumentGrant, AuditEvent
@@ -75,4 +78,5 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(debug=False)
+    app.run(host="0.0.0", port=5000,debug=True)
+    

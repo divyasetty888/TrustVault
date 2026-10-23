@@ -1,7 +1,6 @@
 
-from app import db
+from extension import db
 from models import DocumentGrant
-
 
 def can_access_document(user, document, action):
     # Default deny.
