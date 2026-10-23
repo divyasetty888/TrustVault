@@ -50,7 +50,7 @@ def login():
         session.clear()
         login_user(user, fresh=True)
 
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("dashboard.index"))
 
     return render_template("login.html")
 

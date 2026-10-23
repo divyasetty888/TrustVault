@@ -1,0 +1,55 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TrustVault - Audit Activity</title>
+</head>
+<body>
+    <h1>Audit Activity</h1>
+
+    <p>
+        Audit chain status:
+        {% if chain_valid %}
+            <strong>Valid</strong>
+        {% else %}
+            <strong>INVALID</strong>
+            (Problem at event ID: {{ failing_event_id }})
+        {% endif %}
+    </p>
+
+    <p><a href="{{ url_for('dashboard.index') }}">Back to dashboard</a></p>
+
+    {% if events %}
+    <table border="1" cellpadding="8">
+        <thead>
+            <tr>
+                <th>Event ID</th>
+                <th>User ID</th>
+                <th>Document ID</th>
+                <th>Action</th>
+                <th>Outcome</th>
+                <th>Timestamp</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events %}
+            <tr>
+                <td>{{ event.id }}</td>
+                <td>{{ event.actor_id }}</td>
+                <td>{{ event.document_id if event.document_id is not none else "-" }}</td>
+                <td>{{ event.action }}</td>
+                <td>{{ event.outcome }}</td>
+                <td>{{ event.timestamp }}</td>
+                <td>{{ event.details }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p>No audit events have been recorded yet.</p>
+    {% endif %}
+</body>
+</html>
