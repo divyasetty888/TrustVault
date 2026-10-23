@@ -15,6 +15,14 @@ from datetime import datetime, timezone
 
 from extension import db
 from models import AuditEvent
+def _utc_isoformat(value):
+    """Return a consistent UTC timestamp string for audit hashing."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+
+    return value.isoformat()
 
 
 def record_event(actor_id, document_id, action, outcome, details=None):
@@ -40,14 +48,13 @@ def record_event(actor_id, document_id, action, outcome, details=None):
         separators=(",", ":"),
         default=str,
     )
-
     # Hash a canonical representation so key ordering does not change the hash.
     event_data = {
         "actor_id": actor_id,
         "document_id": document_id,
         "action": action,
         "outcome": outcome,
-        "timestamp": timestamp.isoformat(),
+        "timestamp": _utc_isoformat(timestamp),
         "previous_hash": previous_hash,
         "details": json.loads(details_json),
     }
@@ -98,7 +105,7 @@ def verify_audit_chain():
                 "document_id": event.document_id,
                 "action": event.action,
                 "outcome": event.outcome,
-                "timestamp": event.timestamp.isoformat(),
+                "timestamp": _utc_isoformat(event.timestamp),
                 "previous_hash": event.previous_hash,
                 "details": details_value,
             }

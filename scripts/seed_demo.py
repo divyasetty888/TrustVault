@@ -3,7 +3,6 @@ import getpass
 import os
 import sys
 
-# Allow this script to import app.py and models.py
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -33,48 +32,48 @@ def create_demo_user(email, role, password):
         role=role,
         is_active=True,
     )
-
     db.session.add(user)
     print(f"Prepared {role} account: {email}")
 
 
 def main():
-    # Require explicit confirmation before creating accounts.
     confirmation = input(
-        "This will create local TrustVault demo accounts. "
-        "Continue? Type CREATE: "
+        "Create local TrustVault demo accounts? Type CREATE: "
     )
-
     if confirmation != "CREATE":
         print("Cancelled. No accounts created.")
         return
 
-    admin_email = input("Demo admin email: ").strip().lower()
-    admin_password = getpass.getpass("Demo admin password: ")
+    accounts = [
+        ("admin", input("Admin email: ").strip().lower(),
+         getpass.getpass("Admin password: ")),
+        ("owner", input("Owner email: ").strip().lower(),
+         getpass.getpass("Owner password: ")),
+        ("viewer", input("Viewer email: ").strip().lower(),
+         getpass.getpass("Viewer password: ")),
+    ]
 
-    viewer_email = input("Demo viewer email: ").strip().lower()
-    viewer_password = getpass.getpass("Demo viewer password: ")
+    emails = [email for _, email, _ in accounts]
 
-    if not all(
-        [admin_email, admin_password, viewer_email, viewer_password]
-    ):
+    if any(not email or not password for _, email, password in accounts):
         print("Error: Emails and passwords cannot be empty.")
         return
 
-    if admin_email == viewer_email:
-        print("Error: Admin and viewer must use different emails.")
+    if len(set(emails)) != len(emails):
+        print("Error: Each demo account must have a different email.")
         return
 
-    if len(admin_password) < 12 or len(viewer_password) < 12:
-        print("Error: Use passwords with at least 12 characters.")
+    if any(len(password) < 12 for _, _, password in accounts):
+        print("Error: Each password must be at least 12 characters.")
         return
 
     app = create_app()
 
     with app.app_context():
         try:
-            create_demo_user(admin_email, "admin", admin_password)
-            create_demo_user(viewer_email, "viewer", viewer_password)
+            for role, email, password in accounts:
+                create_demo_user(email, role, password)
+
             db.session.commit()
             print("Demo account seeding completed.")
         except Exception:

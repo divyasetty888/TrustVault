@@ -1,7 +1,4 @@
-
-# TrustVault Threat Model
-
-## 1. Scope
+1. Scope
 
 TrustVault is a document-sharing application with administrator, owner,
 and viewer roles. Its security depends on authentication, document-level
@@ -72,14 +69,14 @@ A test must not be described as passing until it has been executed.
 Update this section based on the final implementation and test results.
 
 - A database-backed hash chain may not protect audit records against an
-  attacker who can rewrite the database and recompute the entire chain.
-  Independent log storage or external hash anchoring would strengthen it.
+  attacker who can rewrite the database and recompute the entire chain.
+  Independent log storage or external hash anchoring would strengthen it.
 - Debug mode must not be enabled in public production deployment.
 - Uploaded files must not be stored in a publicly accessible directory.
 - Rate limiting, brute-force protection, backup recovery, and production
-  monitoring must be evaluated before deployment.
+  monitoring must be evaluated before deployment.
 - A successful unit-test run does not establish that all application
-  routes and deployment settings are secure.
+  routes and deployment settings are secure.
 
 ## 7. Final Review
 
