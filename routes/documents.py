@@ -1,7 +1,9 @@
+
 """Secure document listing, upload, and download routes for TrustVault."""
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
 from flask import (
     Blueprint,
@@ -21,14 +23,19 @@ from extension import db
 from models import Document, DocumentGrant, User
 from permissions import can_access_document
 from audit import record_event
-from storage import get_stored_file, save_upload, validate_upload
+from storage import (
+    delete_stored_file,
+    get_stored_file,
+    save_upload,
+    validate_upload,
+)
 
 
 documents_bp = Blueprint("documents", __name__, url_prefix="/documents")
 
 
 def _audit_denied(document, attempted_document_id, action, reason):
-    """Record a denied attempt without relying on a possibly missing document FK."""
+    """Record a denied attempt without requiring a document to exist."""
     record_event(
         actor_id=current_user.id,
         document_id=document.id if document is not None else None,
@@ -43,7 +50,7 @@ def _audit_denied(document, attempted_document_id, action, reason):
 
 
 def _visible_documents():
-    """Return non-deleted documents the current user may potentially see."""
+    """Return documents potentially visible to the current user."""
     query = Document.query.filter_by(is_deleted=False)
 
     if getattr(current_user, "role", None) == "admin":
@@ -52,6 +59,7 @@ def _visible_documents():
     granted_ids = db.session.query(DocumentGrant.document_id).filter_by(
         user_id=current_user.id
     )
+
     return query.filter(
         or_(
             Document.owner_id == current_user.id,
@@ -63,7 +71,7 @@ def _visible_documents():
 @documents_bp.get("/")
 @login_required
 def list_documents():
-    """List and search only documents visible to the logged-in user."""
+    """List and search documents visible to the logged-in user."""
     query = _visible_documents()
 
     name = request.args.get("name", "").strip()
@@ -74,8 +82,10 @@ def list_documents():
 
     if name:
         query = query.filter(Document.title.ilike(f"%{name}%"))
+
     if category:
         query = query.filter(Document.category.ilike(f"%{category}%"))
+
     if owner_email:
         query = query.join(User, User.id == Document.owner_id).filter(
             User.email.ilike(f"%{owner_email}%")
@@ -83,18 +93,15 @@ def list_documents():
 
     if date_from:
         try:
-            query = query.filter(
-                Document.created_at >= datetime.strptime(date_from, "%Y-%m-%d")
-            )
+            start_date = datetime.strptime(date_from, "%Y-%m-%d")
+            query = query.filter(Document.created_at >= start_date)
         except ValueError:
             flash("Invalid start date. Use YYYY-MM-DD.", "error")
             return redirect(url_for("documents.list_documents"))
 
     if date_to:
         try:
-            # Inclusive date: compare against midnight after the selected date.
-            end_exclusive = datetime.strptime(date_to, "%Y-%m-%d") 
-            from datetime import timedelta
+            end_exclusive = datetime.strptime(date_to, "%Y-%m-%d")
             end_exclusive += timedelta(days=1)
             query = query.filter(Document.created_at < end_exclusive)
         except ValueError:
@@ -102,10 +109,12 @@ def list_documents():
             return redirect(url_for("documents.list_documents"))
 
     documents = query.order_by(Document.created_at.desc()).all()
-    # Fail closed: apply the same read policy used by download routes.
+
+    # Apply the same access policy used by the download route.
     documents = [
-        doc for doc in documents
-        if can_access_document(current_user, doc, "read")
+        document
+        for document in documents
+        if can_access_document(current_user, document, "read")
     ]
 
     return render_template(
@@ -124,7 +133,7 @@ def list_documents():
 @documents_bp.post("/upload")
 @login_required
 def upload_document():
-    """Validate and store an uploaded file as a private, randomly named object."""
+    """Validate and upload a document to private Supabase Storage."""
     if getattr(current_user, "role", None) not in ("owner", "admin"):
         record_event(
             actor_id=current_user.id,
@@ -138,6 +147,7 @@ def upload_document():
 
     uploaded_file = request.files.get("file")
     safe_original_name, validation_result = validate_upload(uploaded_file)
+
     if safe_original_name is None:
         flash(validation_result, "error")
         return redirect(url_for("documents.list_documents"))
@@ -147,17 +157,31 @@ def upload_document():
     category = request.form.get("category", "").strip()
 
     if not title or len(title) > 200:
-        flash("Enter a title of 1–200 characters.", "error")
+        flash("Enter a title of 1-200 characters.", "error")
         return redirect(url_for("documents.list_documents"))
+
     if len(category) > 100:
         flash("Category must be 100 characters or fewer.", "error")
         return redirect(url_for("documents.list_documents"))
 
-    # Save first, then persist metadata. Delete the stored file if DB work fails.
     storage_key = None
+
     try:
-        storage_key, file_path = save_upload(uploaded_file, extension)
-        digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        # Hash the validated content before uploading it.
+        uploaded_file.stream.seek(0)
+        digest_builder = hashlib.sha256()
+
+        while True:
+            chunk = uploaded_file.stream.read(64 * 1024)
+            if not chunk:
+                break
+            digest_builder.update(chunk)
+
+        digest = digest_builder.hexdigest()
+        uploaded_file.stream.seek(0)
+
+        storage_key, _ = save_upload(uploaded_file, extension)
+
         document = Document(
             owner_id=current_user.id,
             title=title,
@@ -167,6 +191,7 @@ def upload_document():
             is_deleted=False,
             created_at=datetime.now(timezone.utc),
         )
+
         db.session.add(document)
         db.session.flush()
 
@@ -182,13 +207,20 @@ def upload_document():
                 "content_hash": digest,
             },
         )
+
         db.session.commit()
+
     except Exception:
         db.session.rollback()
+
         if storage_key:
-            path = get_stored_file(storage_key)
-            if path:
-                path.unlink(missing_ok=True)
+            try:
+                delete_stored_file(storage_key)
+            except Exception:
+                current_app.logger.exception(
+                    "Failed to clean up uploaded Supabase object"
+                )
+
         current_app.logger.exception("Document upload failed")
         abort(500)
 
@@ -199,7 +231,7 @@ def upload_document():
 @documents_bp.get("/<int:document_id>/download")
 @login_required
 def download_document(document_id):
-    """Download a document only after a fresh authorization check."""
+    """Authorize every download and return file bytes from private storage."""
     document = db.session.get(Document, document_id)
 
     if not can_access_document(current_user, document, "read"):
@@ -209,11 +241,16 @@ def download_document(document_id):
             action="document_download",
             reason="not_found_or_not_authorized",
         )
-        # Return the same status for missing and unauthorized IDs.
+        # Missing and unauthorized IDs return the same status.
         abort(404)
 
-    stored_path = get_stored_file(document.storage_key)
-    if stored_path is None:
+    try:
+        file_bytes = get_stored_file(document.storage_key)
+    except Exception:
+        current_app.logger.exception("Document download failed")
+        abort(502)
+
+    if file_bytes is None:
         record_event(
             actor_id=current_user.id,
             document_id=document.id,
@@ -224,6 +261,20 @@ def download_document(document_id):
         db.session.commit()
         abort(404)
 
+    # Verify the stored object's contents against the saved SHA-256 digest.
+    actual_hash = hashlib.sha256(file_bytes).hexdigest()
+
+    if actual_hash != document.content_hash:
+        record_event(
+            actor_id=current_user.id,
+            document_id=document.id,
+            action="document_download",
+            outcome="error",
+            details={"reason": "content_hash_mismatch"},
+        )
+        db.session.commit()
+        abort(500)
+
     record_event(
         actor_id=current_user.id,
         document_id=document.id,
@@ -233,11 +284,12 @@ def download_document(document_id):
     )
     db.session.commit()
 
-    # Use a generic download name, not the private storage key.
-    download_name = f"document-{document.id}"
+    # Do not expose the original filename or private storage key.
+    download_name = f"document-{document.id}.bin"
+
     return send_file(
-        stored_path,
+        BytesIO(file_bytes),
+        mimetype="application/octet-stream",
         as_attachment=True,
         download_name=download_name,
-        conditional=True,
     )
