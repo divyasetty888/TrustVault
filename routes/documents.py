@@ -30,7 +30,6 @@ from storage import (
     validate_upload,
 )
 
-
 documents_bp = Blueprint("documents", __name__, url_prefix="/documents")
 
 
@@ -117,9 +116,22 @@ def list_documents():
         if can_access_document(current_user, document, "read")
     ]
 
+    # Load sharing details once per document for the template.
+    grants_by_document = {}
+
+    for document in documents:
+        grants = (
+            db.session.query(DocumentGrant, User.email)
+            .join(User, User.id == DocumentGrant.user_id)
+            .filter(DocumentGrant.document_id == document.id)
+            .all()
+        )
+        grants_by_document[document.id] = grants
+
     return render_template(
         "documents.html",
         documents=documents,
+        grants_by_document=grants_by_document,
         filters={
             "name": name,
             "owner": owner_email,
@@ -133,7 +145,7 @@ def list_documents():
 @documents_bp.post("/upload")
 @login_required
 def upload_document():
-    """Validate and upload a document to private Supabase Storage."""
+    """Validate and upload a document to private storage."""
     if getattr(current_user, "role", None) not in ("owner", "admin"):
         record_event(
             actor_id=current_user.id,
@@ -167,7 +179,7 @@ def upload_document():
     storage_key = None
 
     try:
-        # Hash the validated content before uploading it.
+        # Calculate SHA-256 before saving the file.
         uploaded_file.stream.seek(0)
         digest_builder = hashlib.sha256()
 
@@ -218,7 +230,7 @@ def upload_document():
                 delete_stored_file(storage_key)
             except Exception:
                 current_app.logger.exception(
-                    "Failed to clean up uploaded Supabase object"
+                    "Failed to clean up uploaded object"
                 )
 
         current_app.logger.exception("Document upload failed")
@@ -231,7 +243,7 @@ def upload_document():
 @documents_bp.get("/<int:document_id>/download")
 @login_required
 def download_document(document_id):
-    """Authorize every download and return file bytes from private storage."""
+    """Authorize every download and verify the stored file's integrity."""
     document = db.session.get(Document, document_id)
 
     if not can_access_document(current_user, document, "read"):
@@ -261,7 +273,6 @@ def download_document(document_id):
         db.session.commit()
         abort(404)
 
-    # Verify the stored object's contents against the saved SHA-256 digest.
     actual_hash = hashlib.sha256(file_bytes).hexdigest()
 
     if actual_hash != document.content_hash:
@@ -284,7 +295,7 @@ def download_document(document_id):
     )
     db.session.commit()
 
-    # Do not expose the original filename or private storage key.
+    # Keep the original filename and storage key private.
     download_name = f"document-{document.id}.bin"
 
     return send_file(

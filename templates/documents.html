@@ -9,9 +9,16 @@
 <body>
     <h1>TrustVault Documents</h1>
 
+    <p>
+        Logged in as {{ current_user.email }}
+        ({{ current_user.role }})
+    </p>
+
+    <p><a href="{{ url_for('dashboard.index') }}">Back to dashboard</a></p>
+
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for category, message in messages %}
-        <p>{{ message }}</p>
+        <p role="status">{{ message }}</p>
       {% endfor %}
     {% endwith %}
 
@@ -27,7 +34,7 @@
         </label>
 
         <label>Category
-            <input name="category" maxlength="100" required>
+            <input name="category" maxlength="100">
         </label>
 
         <label>File
@@ -40,25 +47,87 @@
 
     <h2>Search documents</h2>
     <form method="get" action="{{ url_for('documents.list_documents') }}">
-        <input name="name" placeholder="Document name">
-        <input name="owner" placeholder="Owner email">
-        <input name="category" placeholder="Category">
-        <label>From <input type="date" name="date_from"></label>
-        <label>To <input type="date" name="date_to"></label>
+        <input name="name" placeholder="Document name"
+               value="{{ filters.name }}">
+        <input name="owner" placeholder="Owner email"
+               value="{{ filters.owner }}">
+        <input name="category" placeholder="Category"
+               value="{{ filters.category }}">
+        <label>From
+            <input type="date" name="date_from"
+                   value="{{ filters.date_from }}">
+        </label>
+        <label>To
+            <input type="date" name="date_to"
+                   value="{{ filters.date_to }}">
+        </label>
         <button type="submit">Search</button>
+        <a href="{{ url_for('documents.list_documents') }}">Clear filters</a>
     </form>
 
     <h2>Available documents</h2>
+
     {% if documents %}
       <ul>
       {% for document in documents %}
         <li>
           <strong>{{ document.title }}</strong>
-          — {{ document.category }}
+          — {{ document.category or "General" }}
           — {{ document.created_at }}
-          <a href="{{ url_for('documents.download_document', document_id=document.id) }}">
+
+          <a href="{{ url_for('documents.download_document',
+                              document_id=document.id) }}">
             Download
           </a>
+
+          {% if document.owner_id == current_user.id %}
+          <h3>Share document</h3>
+
+          <form method="post"
+                action="{{ url_for('sharing.grant_access',
+                                   document_id=document.id) }}">
+              <input type="hidden" name="csrf_token"
+                     value="{{ csrf_token() }}">
+
+              <label>Recipient email
+                  <input type="email" name="email" required>
+              </label>
+
+              <label>Permission
+                  <select name="permission" required>
+                      <option value="read">Read only</option>
+                      <option value="edit">Edit</option>
+                  </select>
+              </label>
+
+              <button type="submit">Save access</button>
+          </form>
+
+          <h4>People with access</h4>
+          {% set grants = grants_by_document.get(document.id, []) %}
+
+          {% if grants %}
+            <ul>
+            {% for grant, recipient_email in grants %}
+              <li>
+                {{ recipient_email }} — {{ grant.permission }}
+
+                <form method="post"
+                      action="{{ url_for('sharing.revoke_access',
+                                         document_id=document.id,
+                                         user_id=grant.user_id) }}"
+                      style="display:inline">
+                    <input type="hidden" name="csrf_token"
+                           value="{{ csrf_token() }}">
+                    <button type="submit">Revoke</button>
+                </form>
+              </li>
+            {% endfor %}
+            </ul>
+          {% else %}
+            <p>This document has not been shared.</p>
+          {% endif %}
+          {% endif %}
         </li>
       {% endfor %}
       </ul>

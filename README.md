@@ -73,7 +73,7 @@ Follow the prompts and use unique, strong passwords. Do not commit demo password
 python -m pytest -q
 ```
 
-The current local test suite has 14 passing tests. Run the tests again after making changes.
+The current local test suite has 22 passing tests. Run the tests again after making changes.
 
 ## Security Notes
 
