@@ -1,7 +1,7 @@
 
 import os
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, url_for
+from flask import Flask, jsonify, redirect, url_for, send_from_directory
 from extension import db, login_manager, csrf
 
 load_dotenv()
@@ -77,7 +77,13 @@ def create_app(test_config=None):
     @app.get("/health")
     def health():
         return jsonify(status="ok", application="TrustVault"), 200
-
+    @app.get("/google6820d22b63595a40.html")
+    def google_site_verification():
+        return send_from_directory(
+            app.root_path,
+            "google6820d22b63595a40.html",
+            mimetype="text/html",
+        )
     # Root URL redirects to the dashboard
     @app.get("/")
     def home():
